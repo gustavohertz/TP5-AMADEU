@@ -1,0 +1,99 @@
+name: Pipeline CI/CD Completo
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: '17'
+
+jobs:
+  # 1. Build e Testes Unitários
+  build-and-test:
+    name: 🏗️ Build & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Permissão Gradlew
+        run: chmod +x backend/gradlew
+
+      - name: Build e Testes
+        run: |
+          cd backend
+          ./gradlew clean build -x test
+          ./gradlew test --info
+
+      - name: Upload Artefato (JAR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: backend/build/libs/*.jar
+          retention-days: 1
+
+  # 2. Deploy Simulado
+  deploy:
+    name: 🚀 Deploy Produção
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download Artefato
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: ./app
+
+      - name: Simular Deploy
+        run: echo "Deploy realizado com sucesso em Produção."
+
+  # 3. Validação Pós-Deploy (Selenium)
+  post-deploy-tests:
+    name: 🧪 Testes E2E (Selenium)
+    needs: deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Download Artefato
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: backend/build/libs/
+
+      # Levanta o servidor em background para testar
+      - name: Iniciar Aplicação
+        run: |
+          nohup java -jar backend/build/libs/*.jar &
+          echo "Aguardando servidor iniciar..."
+          sleep 15
+
+      - name: Rodar Selenium
+        env:
+          APP_URL: "http://localhost:8080"
+          CI: "true"
+        run: |
+          cd Backend
+          chmod +x gradlew
+          ./gradlew test --tests "org.example.e2e.SeleniumPostDeployTest"
